@@ -138,6 +138,15 @@ namespace FCG
         bool withDowntownArea = true;
         float downTownSize = 100;
 
+        [Header("Spider Network")]
+        public bool generateSpiderNetwork = false;
+        [Range(1, 6)]
+        public int mainCitiesCount = 1;
+        [Range(0, 4)]
+        public int subCitiesPerMain = 1;
+        [Range(1, 4)]
+        public int extraRoadLinks = 2;
+
         public void ClearCity()
         {
             if (!cityMaker)
@@ -150,6 +159,12 @@ namespace FCG
 
         public void GenerateCity(int size, bool withSatteliteCity = false, bool borderFlat = false, int satteliteCitiesCount = 1)
         {
+
+            if (generateSpiderNetwork && mainCitiesCount > 1)
+            {
+                GenerateSpiderNetwork(size, borderFlat, satteliteCitiesCount);
+                return;
+            }
 
             bool satCity = false;
 
@@ -201,6 +216,147 @@ namespace FCG
             if (dayNight)
                 dayNight.ChangeMaterial();
 
+        }
+
+        private void GenerateSpiderNetwork(int primaryCitySize, bool borderFlat, int defaultSatelliteCount)
+        {
+            ClearCity();
+            cityMaker = new GameObject("City-Maker");
+
+            var cityAnchors = new System.Collections.Generic.List<Vector3>();
+            cityAnchors.Add(Vector3.zero);
+
+            for (int mainIndex = 0; mainIndex < mainCitiesCount; mainIndex++)
+            {
+                int citySize = (mainIndex == 0) ? primaryCitySize : Random.Range(1, 5);
+                Vector3 cityOffset = (mainIndex == 0) ? Vector3.zero : RandomCityOffset(mainIndex);
+                cityAnchors.Add(cityOffset);
+
+                int localSatellites = Mathf.Max(defaultSatelliteCount, subCitiesPerMain);
+                int borderType = Random.Range(0, 4);
+                GenerateCityCluster(citySize, cityOffset, borderFlat, localSatellites, borderType);
+            }
+
+            BuildSpiderRoadLinks(cityAnchors);
+
+            DayNight dayNight = FindObjectOfType<DayNight>();
+            if (dayNight)
+                dayNight.ChangeMaterial();
+        }
+
+        private Vector3 RandomCityOffset(int cityIndex)
+        {
+            float radius = 1800f + cityIndex * Random.Range(400f, 750f);
+            float angle = Random.Range(0f, Mathf.PI * 2f);
+            return new Vector3(Mathf.Cos(angle) * radius, 0, Mathf.Sin(angle) * radius);
+        }
+
+        private void GenerateCityCluster(int citySize, Vector3 offset, bool borderFlat, int satelliteCount, int borderType)
+        {
+            GameObject[] selectedBorder = GetBorderBySize(citySize, borderFlat, false);
+            GameObject[] selectedBlocks = (citySize == 4 && bigLargeBlocks.Length > 0 && Random.value > 0.4f) ? bigLargeBlocks : largeBlocks;
+            if (selectedBorder == null || selectedBorder.Length == 0 || selectedBlocks == null || selectedBlocks.Length == 0)
+                return;
+
+            int blockCount = Mathf.Clamp(citySize + 1, 2, 7);
+            for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+            {
+                Vector3 blockOffset = new Vector3((blockIndex % 3) * 300 - 300, 0, (blockIndex / 3) * 300 - 150);
+                Vector3 jitter = new Vector3(Random.Range(-60f, 60f), 0, Random.Range(-60f, 60f));
+                Quaternion rotation = Quaternion.Euler(0, Random.Range(0, 4) * 90f, 0);
+                Instantiate(selectedBlocks[Random.Range(0, selectedBlocks.Length)], offset + blockOffset + jitter, rotation, cityMaker.transform);
+            }
+
+            Quaternion borderRotation = Quaternion.Euler(0, borderType * 90f, 0);
+            Instantiate(selectedBorder[Random.Range(0, selectedBorder.Length)], offset, borderRotation, cityMaker.transform);
+
+            for (int satelliteIndex = 0; satelliteIndex < satelliteCount; satelliteIndex++)
+            {
+                Vector3 satOffset = offset + Quaternion.Euler(0, satelliteIndex * (360f / Mathf.Max(1, satelliteCount)), 0) * new Vector3(0, 0, Random.Range(700f, 1200f));
+                GenerateSubCity(satOffset, borderFlat);
+                CreateRoadConnection(offset, satOffset, 0.65f);
+            }
+        }
+
+        private void GenerateSubCity(Vector3 offset, bool borderFlat)
+        {
+            GameObject[] subBorder = (Random.value > 0.5f) ? (borderFlat ? miniBorderFlat : miniBorder) : (borderFlat ? smallBorderFlat : smallBorder);
+            if (subBorder == null || subBorder.Length == 0 || largeBlocks.Length == 0)
+                return;
+
+            int blockCount = Random.Range(1, 4);
+            for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+            {
+                Vector3 blockOffset = new Vector3((blockIndex - 1) * 250, 0, Random.Range(-180f, 180f));
+                Quaternion rotation = Quaternion.Euler(0, Random.Range(0, 4) * 90f, 0);
+                Instantiate(largeBlocks[Random.Range(0, largeBlocks.Length)], offset + blockOffset, rotation, cityMaker.transform);
+            }
+
+            Instantiate(subBorder[Random.Range(0, subBorder.Length)], offset, Quaternion.Euler(0, Random.Range(0, 4) * 90f, 0), cityMaker.transform);
+        }
+
+        private GameObject[] GetBorderBySize(int citySize, bool borderFlat, bool withExit)
+        {
+            switch (citySize)
+            {
+                case 1:
+                    if (withExit && miniBorderWithExitOfCity.Length > 0) return miniBorderWithExitOfCity;
+                    return borderFlat ? miniBorderFlat : miniBorder;
+                case 2:
+                    if (withExit && smallBorderWithExitOfCity.Length > 0) return smallBorderWithExitOfCity;
+                    return borderFlat ? smallBorderFlat : smallBorder;
+                case 3:
+                    if (withExit && mediumBorderWithExitOfCity.Length > 0) return mediumBorderWithExitOfCity;
+                    return borderFlat ? mediumBorderFlat : mediumBorder;
+                default:
+                    if (withExit && largeBorderWithExitOfCity.Length > 0) return largeBorderWithExitOfCity;
+                    return borderFlat ? largeBorderFlat : largeBorder;
+            }
+        }
+
+        private void BuildSpiderRoadLinks(System.Collections.Generic.List<Vector3> cityAnchors)
+        {
+            if (cityAnchors.Count < 3)
+                return;
+
+            Vector3 center = cityAnchors[1];
+            for (int i = 2; i < cityAnchors.Count; i++)
+            {
+                CreateRoadConnection(center, cityAnchors[i], 1f);
+            }
+
+            for (int i = 0; i < extraRoadLinks; i++)
+            {
+                int a = Random.Range(1, cityAnchors.Count);
+                int b = Random.Range(1, cityAnchors.Count);
+                if (a == b)
+                    continue;
+                CreateRoadConnection(cityAnchors[a], cityAnchors[b], 0.5f);
+            }
+        }
+
+        private void CreateRoadConnection(Vector3 start, Vector3 end, float density)
+        {
+            GameObject[] roadChoices = (forward400 != null && forward400.Length > 0) ? forward400 : forward300;
+            if (roadChoices == null || roadChoices.Length == 0)
+                return;
+
+            Vector3 delta = end - start;
+            float distance = delta.magnitude;
+            if (distance < 10f)
+                return;
+
+            Vector3 direction = delta.normalized;
+            Quaternion rotation = Quaternion.LookRotation(direction, Vector3.up);
+            float spacing = Mathf.Lerp(360f, 220f, Mathf.Clamp01(density));
+            int segments = Mathf.Max(1, Mathf.FloorToInt(distance / spacing));
+
+            for (int segmentIndex = 0; segmentIndex <= segments; segmentIndex++)
+            {
+                float t = segmentIndex / (float)segments;
+                Vector3 roadPos = Vector3.Lerp(start, end, t);
+                Instantiate(roadChoices[Random.Range(0, roadChoices.Length)], roadPos, rotation, cityMaker.transform);
+            }
         }
 
 
