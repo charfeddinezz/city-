@@ -326,8 +326,6 @@ namespace FCG
 
             bool invert = (Random.Range(1, 20) < 10);
 
-            Transform test = new GameObject("verify").transform;
-
             for (int j = 0; j < n; j++)
             {
 
@@ -369,17 +367,19 @@ namespace FCG
 
                         vehicle = (GameObject)Instantiate(IaCars[Mathf.Clamp(Random.Range(0, IaCars.Length), 0, IaCars.Length - 1)], wpDataSpawn[i].position + Vector3.up * 0.1f, wpDataSpawn[i].rotation); ;
                         vehicle.transform.SetParent(CarContainer.transform);
-                        vehicle.GetComponent<TrafficCar>().sideAtual = (wpDataSpawn[i].wayScript.oneway && wpDataSpawn[i].wayScript.doubleLine && wpDataSpawn[i].wayScript.rightHand != 0) ? ((wpDataSpawn[i].side == 1) ? 0 : 1) : wpDataSpawn[i].side;
-                        vehicle.GetComponent<TrafficCar>().atualWay = wpDataSpawn[i].wayScript.transform;
-                        vehicle.GetComponent<TrafficCar>().atualWayScript = wpDataSpawn[i].wayScript;
-                        vehicle.GetComponent<TrafficCar>().currentNode = wpDataSpawn[i].node + 1;
+                        TrafficCar trafficCar = vehicle.GetComponent<TrafficCar>();
+
+                        trafficCar.sideAtual = (wpDataSpawn[i].wayScript.oneway && wpDataSpawn[i].wayScript.doubleLine && wpDataSpawn[i].wayScript.rightHand != 0) ? ((wpDataSpawn[i].side == 1) ? 0 : 1) : wpDataSpawn[i].side;
+                        trafficCar.atualWay = wpDataSpawn[i].wayScript.transform;
+                        trafficCar.atualWayScript = wpDataSpawn[i].wayScript;
+                        trafficCar.currentNode = wpDataSpawn[i].node + 1;
 
                         if (player)
                         {
-                            vehicle.GetComponent<TrafficCar>().distanceToSelfDestroy = around;
-                            vehicle.GetComponent<TrafficCar>().player = player;
-                            vehicle.GetComponent<TrafficCar>().tSystem = this;
-                            vehicle.GetComponent<TrafficCar>().ActivateSelfDestructWhenAwayFromThePlayer();
+                            trafficCar.distanceToSelfDestroy = around;
+                            trafficCar.player = player;
+                            trafficCar.tSystem = this;
+                            trafficCar.ActivateSelfDestructWhenAwayFromThePlayer();
                         }
 
                         nVehicles++;
@@ -393,11 +393,6 @@ namespace FCG
 
 
             }
-
-            if (Application.isPlaying)
-                Destroy(test.gameObject);
-            else
-                DestroyImmediate(test.gameObject);
 
 
             if (nVehicles > 0)
