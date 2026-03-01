@@ -23,6 +23,11 @@ public class FCityGenerator : EditorWindow
     private int mainCitiesCount = 3;
     private int subCitiesPerMain = 2;
     private int extraRoadLinks = 2;
+    private bool generateCityByCity = true;
+    private float minMainCityDistance = 1500f;
+    private float roadSegmentSpacing = 240f;
+    private float roadClearanceRadius = 10f;
+    private float roadSnapDistance = 18f;
 
 
     private int trafficLightHand = 0;
@@ -158,7 +163,12 @@ public class FCityGenerator : EditorWindow
         cityGenerator.mainCitiesCount = mainCitiesCount;
         cityGenerator.subCitiesPerMain = subCitiesPerMain;
         cityGenerator.extraRoadLinks = extraRoadLinks;
-        
+        cityGenerator.generateCityByCity = generateCityByCity;
+        cityGenerator.minMainCityDistance = minMainCityDistance;
+        cityGenerator.roadSegmentSpacing = roadSegmentSpacing;
+        cityGenerator.roadClearanceRadius = roadClearanceRadius;
+        cityGenerator.roadSnapDistance = roadSnapDistance;
+
         cityGenerator.GenerateCity(size, withSatteliteCity, borderFlat, satteliteCitiesCount);
 
         if (trafficSystem)
@@ -251,9 +261,20 @@ public class FCityGenerator : EditorWindow
 
         if (generateSpiderNetwork)
         {
-            mainCitiesCount = EditorGUILayout.IntSlider("Main Cities", mainCitiesCount, 2, 6);
-            subCitiesPerMain = EditorGUILayout.IntSlider("Sub Cities / Main", subCitiesPerMain, 0, 4);
-            extraRoadLinks = EditorGUILayout.IntSlider("Extra Road Links", extraRoadLinks, 1, 4);
+            GUILayout.BeginVertical("box");
+            GUILayout.Label("Spider Network Settings", EditorStyles.boldLabel);
+            mainCitiesCount = EditorGUILayout.IntSlider("Main Cities", mainCitiesCount, 1, 10000);
+            subCitiesPerMain = EditorGUILayout.IntSlider("Sub Cities / Main", subCitiesPerMain, 0, 10000);
+            extraRoadLinks = EditorGUILayout.IntSlider("Extra Road Links", extraRoadLinks, 0, 10000);
+            generateCityByCity = GUILayout.Toggle(generateCityByCity, "Generate City by City", GUILayout.Width(240));
+            minMainCityDistance = EditorGUILayout.Slider("Main City Distance", minMainCityDistance, 500f, 3500f);
+
+            GUILayout.Space(6);
+            GUILayout.Label("Professional Road Linking", EditorStyles.boldLabel);
+            roadSegmentSpacing = EditorGUILayout.Slider("Road Segment Spacing", roadSegmentSpacing, 50f, 800f);
+            roadClearanceRadius = EditorGUILayout.Slider("Collision Clearance", roadClearanceRadius, 1f, 32f);
+            roadSnapDistance = EditorGUILayout.Slider("Building Snap Avoidance", roadSnapDistance, 5f, 80f);
+            GUILayout.EndVertical();
         }
 
         if (withSatteliteCity)
