@@ -103,6 +103,7 @@ namespace FCG
         private bool toSignalLeft = false;
         private bool toSignalRight = false;
         private Transform behind = null;
+        private float cachedNextPathAngle = 0;
 
         //[HideInInspector]
         public Transform player;
@@ -636,7 +637,7 @@ namespace FCG
                     status = StatusCar.waitingForAnotherVehicleToPass;
 
 
-                if (speed < 2 && (status != StatusCar.stoppedAtTrafficLights || status != StatusCar.waitingForAnotherVehicleToPass))
+                if (speed < 2 && status != StatusCar.stoppedAtTrafficLights && status != StatusCar.waitingForAnotherVehicleToPass)
                 {
 
 
@@ -825,7 +826,12 @@ namespace FCG
         {
 
             RaycastHit hit;
-            float wdist = 6;
+            float wdist = Mathf.Lerp(6f, 14f, Mathf.Clamp01(speed / carSetting.limitSpeed));
+
+            // Increase lookahead when turning to avoid late braking at intersections.
+            if (Mathf.Abs(steer) > carSetting.maxSteerAngle * 0.45f)
+                wdist += 2f;
+
             float wdist2 = (speed < 3) ? (wdist / 1.5f) : wdist;
 
             float rStop;
@@ -912,39 +918,36 @@ namespace FCG
 
             int t = Random.Range(0, total); // Sort one of the available paths
 
+            if (total <= 1)
+                return t;
 
-            if (total > 1) // If there are more path options to choose from
+            float bestScore = float.MinValue;
+
+            for (int i = 0; i < total; i++)
             {
-                if (CheckStoped(t) || VerifyTraffic(t, 30) < 30 || VerifyNodeSteerCarefully2(t))
+                if (CheckStoped(i))
+                    continue;
+
+                float score = 0;
+
+                float freeDistance = VerifyTraffic(i, 30);
+                score += freeDistance * 2.5f;
+
+                float nextAngle = GetAngleToWay(i);
+                float turnPenalty = Mathf.Abs(Mathf.DeltaAngle(0, nextAngle));
+                score -= turnPenalty * 0.2f;
+
+                if (VerifyNodeSteerCarefully2(i))
+                    score -= 18;
+
+                // avoid deterministic traffic waves where all cars pick identical routes
+                score += Random.Range(-1.5f, 1.5f);
+
+                if (score > bestScore)
                 {
-                    //Test the paths to see which option is best
-
-                    float maior = 0;
-                    for (int i = 0; i < total; i++)
-                    {
-
-                        if (!CheckStoped(i)) // && !VerifyNodeSteerCarefully2(i))
-                        {
-                            float vf = VerifyTraffic(i, 30);
-
-                            if (vf == 30)
-                                return i;
-                            else if (vf < 30)
-                            {
-                                if (vf > maior)
-                                {
-                                    maior = vf;
-                                    t = i;
-                                }
-                            }
-
-                        }
-
-
-                    }
-
+                    bestScore = score;
+                    t = i;
                 }
-
             }
 
             return t;
@@ -1010,7 +1013,9 @@ namespace FCG
             Vector3 node1 = GetNodeNextWay(t, 1) + new Vector3(0, 0.5f, 0);
 
 
-            if (Physics.Raycast(node0, node1 - node0, out hit2, mts))
+            Vector3 direction = (node1 - node0).normalized;
+
+            if (Physics.SphereCast(node0, 0.7f, direction, out hit2, mts))
                 if (hit2.transform.GetComponent<TrafficCar>())
                 {
                     if (hit2.transform.GetComponent<TrafficCar>().GetSpeed() < 8)
@@ -1021,6 +1026,13 @@ namespace FCG
 
             return mts;
 
+        }
+
+        float GetAngleToWay(int way)
+        {
+            Vector3 localTarget = transform.InverseTransformPoint(GetNodeNextWay(way, 0));
+            cachedNextPathAngle = Mathf.Atan2(localTarget.x, localTarget.z) * Mathf.Rad2Deg;
+            return cachedNextPathAngle;
         }
 
         private void Pause(Vector3 position)
