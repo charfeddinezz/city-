@@ -141,10 +141,6 @@ namespace FCG
         [Header("Spider Network")]
         public bool generateSpiderNetwork = false;
         public bool smartChainCityRoadNetwork = true;
-        [Range(1, 8)]
-        public int chainBranchFactor = 2;
-        [Range(1, 10000)]
-        public int chainStepLimit = 2500;
         public bool automaticSpiderCounts = true;
         [Range(1, 10000)]
         public int mainCitiesCount = 1;
@@ -175,12 +171,11 @@ namespace FCG
 
         [Header("Memory Guard")]
         public bool enableMemoryGuard = true;
-        [Range(500, 200000)]
-        public int maxRoadPrefabsPerNetwork = 20000;
         public bool smartAdaptiveBudget = true;
 
         private int placedRoadPrefabsInCurrentNetwork = 0;
         private int adaptiveRoadPrefabBudget = 0;
+        private const int DefaultAutomaticRoadPrefabBudget = 20000;
 
         public void ClearCity()
         {
@@ -285,7 +280,7 @@ namespace FCG
 
         private int CalculateAdaptiveRoadBudget(int primaryCitySize)
         {
-            int baseBudget = Mathf.Max(500, maxRoadPrefabsPerNetwork);
+            int baseBudget = Mathf.Max(500, DefaultAutomaticRoadPrefabBudget);
             if (!smartAdaptiveBudget)
                 return baseBudget;
 
@@ -310,6 +305,31 @@ namespace FCG
                 return 1f;
 
             return Mathf.Lerp(1f, 1.45f, Mathf.InverseLerp(0.55f, 1f, Mathf.Clamp01(usage)));
+        }
+
+
+        private int CalculateAutomaticChainBranchFactor(int targetCities)
+        {
+            int safeCities = Mathf.Clamp(targetCities, 1, 10000);
+            if (safeCities <= 2)
+                return 1;
+            if (safeCities <= 6)
+                return 2;
+            if (safeCities <= 14)
+                return 3;
+            if (safeCities <= 32)
+                return 4;
+
+            return Mathf.Clamp(Mathf.RoundToInt(Mathf.Lerp(4f, 6f, Mathf.Clamp01((safeCities - 32f) / 128f))), 1, 8);
+        }
+
+        private int CalculateAutomaticChainStepLimit(int targetCities, int branchFactor)
+        {
+            int safeCities = Mathf.Clamp(targetCities, 1, 10000);
+            int safeBranch = Mathf.Clamp(branchFactor, 1, 8);
+            int estimatedSteps = Mathf.CeilToInt(safeCities / (float)safeBranch);
+            int bufferedSteps = Mathf.CeilToInt(estimatedSteps * 1.35f);
+            return Mathf.Clamp(bufferedSteps + 4, 1, 10000);
         }
 
         private void GenerateSpiderNetwork(int primaryCitySize, bool borderFlat, int defaultSatelliteCount)
@@ -361,8 +381,8 @@ namespace FCG
 
         private void GenerateSmartChainNetwork(int primaryCitySize, bool borderFlat, int satellitesPerMainCity, int maxMainCities, System.Collections.Generic.List<Vector3> cityAnchors)
         {
-            int safeBranchFactor = Mathf.Clamp(chainBranchFactor, 1, 8);
-            int safeStepLimit = Mathf.Clamp(chainStepLimit, 1, 10000);
+            int safeBranchFactor = Mathf.Clamp(CalculateAutomaticChainBranchFactor(maxMainCities), 1, 8);
+            int safeStepLimit = Mathf.Clamp(CalculateAutomaticChainStepLimit(maxMainCities, safeBranchFactor), 1, 10000);
             int safeSatelliteCount = Mathf.Clamp(satellitesPerMainCity, 0, Mathf.Min(24, subCitiesPerMain + 4));
 
             cityAnchors.Add(Vector3.zero);
@@ -617,7 +637,8 @@ namespace FCG
 
         private void CreateRoadConnection(Vector3 start, Vector3 end, float density, bool preventDuplicates = false)
         {
-            GameObject[] roadChoices = (forward400 != null && forward400.Length > 0) ? forward400 : forward300;
+            float estimatedDistance = Vector3.Distance(start, end);
+            GameObject[] roadChoices = SelectRoadPrefabsForConnection(density, estimatedDistance);
             if (roadChoices == null || roadChoices.Length == 0)
                 return;
 
@@ -671,7 +692,7 @@ namespace FCG
                     roadPos.y = desiredHeight;
                 }
 
-                if (RoadPointHasCollision(roadPos))
+                if (RoadPointHasCollision(roadPos) || IsRoadNearBridge(roadPos))
                     continue;
 
                 if (enableMemoryGuard && placedRoadPrefabsInCurrentNetwork >= Mathf.Max(500, adaptiveRoadPrefabBudget))
@@ -680,6 +701,49 @@ namespace FCG
                 Instantiate(roadChoices[Random.Range(0, roadChoices.Length)], roadPos, rotation, cityMaker.transform);
                 placedRoadPrefabsInCurrentNetwork++;
             }
+        }
+
+        private GameObject[] SelectRoadPrefabsForConnection(float density, float distance)
+        {
+            bool longDistance = distance >= 1200f;
+            bool mediumDistance = distance >= 650f;
+            bool highDensity = density >= 0.85f;
+            bool mediumDensity = density >= 0.65f;
+
+            if (longDistance)
+            {
+                if (forward400 != null && forward400.Length > 0)
+                    return forward400;
+                if (forward300 != null && forward300.Length > 0)
+                    return forward300;
+            }
+
+            if (mediumDistance || highDensity)
+            {
+                if (forward300 != null && forward300.Length > 0)
+                    return forward300;
+                if (forward400 != null && forward400.Length > 0)
+                    return forward400;
+                if (forward100 != null && forward100.Length > 0)
+                    return forward100;
+            }
+
+            if (mediumDensity)
+            {
+                if (forward100 != null && forward100.Length > 0)
+                    return forward100;
+                if (forward50 != null && forward50.Length > 0)
+                    return forward50;
+            }
+
+            if (forward50 != null && forward50.Length > 0)
+                return forward50;
+            if (forward100 != null && forward100.Length > 0)
+                return forward100;
+            if (forward300 != null && forward300.Length > 0)
+                return forward300;
+
+            return (forward400 != null && forward400.Length > 0) ? forward400 : null;
         }
 
         private bool ReserveRoadLink(Vector3 a, Vector3 b)
@@ -751,6 +815,24 @@ namespace FCG
             return false;
         }
 
+
+
+        private bool IsRoadNearBridge(Vector3 position)
+        {
+            int overlapCount = Physics.OverlapSphereNonAlloc(position + Vector3.up * 4f, Mathf.Max(12f, roadClearanceRadius * 1.5f), roadOverlapBuffer);
+            for (int i = 0; i < overlapCount; i++)
+            {
+                Collider current = roadOverlapBuffer[i];
+                if (!current)
+                    continue;
+
+                string lowerName = current.name.ToLowerInvariant();
+                if (lowerName.Contains("bridge") || lowerName.Contains("overpass"))
+                    return true;
+            }
+
+            return false;
+        }
 
         private void GenerateSatteliteCityFromExit(Transform exitPositipon)
         {

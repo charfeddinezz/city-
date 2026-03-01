@@ -21,8 +21,6 @@ public class FCityGenerator : EditorWindow
     private bool borderFlat = false;
     private bool generateSpiderNetwork = false;
     private bool smartChainCityRoadNetwork = true;
-    private int chainBranchFactor = 2;
-    private int chainStepLimit = 2500;
     private int mainCitiesCount = 3;
     private int subCitiesPerMain = 2;
     private int extraRoadLinks = 2;
@@ -37,7 +35,6 @@ public class FCityGenerator : EditorWindow
     private float bridgeHeightThreshold = 16f;
     private float bridgeSmoothing = 0.65f;
     private bool enableMemoryGuard = true;
-    private int maxRoadPrefabsPerNetwork = 20000;
     private bool smartAdaptiveBudget = true;
 
 
@@ -172,8 +169,6 @@ public class FCityGenerator : EditorWindow
 
         cityGenerator.generateSpiderNetwork = generateSpiderNetwork;
         cityGenerator.smartChainCityRoadNetwork = smartChainCityRoadNetwork;
-        cityGenerator.chainBranchFactor = chainBranchFactor;
-        cityGenerator.chainStepLimit = chainStepLimit;
         cityGenerator.mainCitiesCount = mainCitiesCount;
         cityGenerator.subCitiesPerMain = subCitiesPerMain;
         cityGenerator.extraRoadLinks = extraRoadLinks;
@@ -188,7 +183,6 @@ public class FCityGenerator : EditorWindow
         cityGenerator.bridgeHeightThreshold = bridgeHeightThreshold;
         cityGenerator.bridgeSmoothing = bridgeSmoothing;
         cityGenerator.enableMemoryGuard = enableMemoryGuard;
-        cityGenerator.maxRoadPrefabsPerNetwork = maxRoadPrefabsPerNetwork;
         cityGenerator.smartAdaptiveBudget = smartAdaptiveBudget;
 
         cityGenerator.GenerateCity(size, withSatteliteCity, borderFlat, satteliteCitiesCount);
@@ -289,8 +283,7 @@ public class FCityGenerator : EditorWindow
             smartChainCityRoadNetwork = GUILayout.Toggle(smartChainCityRoadNetwork, "Smart Chain (city -> road -> city)", GUILayout.Width(260));
             if (smartChainCityRoadNetwork)
             {
-                chainBranchFactor = EditorGUILayout.IntSlider("Chain Branch Factor", chainBranchFactor, 1, 8);
-                chainStepLimit = EditorGUILayout.IntSlider("Chain Step Limit", chainStepLimit, 1, 10000);
+                EditorGUILayout.HelpBox("Chain branching and step limits are fully automatic based on city count and density.", MessageType.Info);
             }
 
             automaticSpiderCounts = GUILayout.Toggle(automaticSpiderCounts, "Automatic for counts", GUILayout.Width(240));
@@ -335,7 +328,7 @@ public class FCityGenerator : EditorWindow
             enableMemoryGuard = GUILayout.Toggle(enableMemoryGuard, "Limit generated road prefabs", GUILayout.Width(240));
             smartAdaptiveBudget = GUILayout.Toggle(smartAdaptiveBudget, "Smart adaptive budget", GUILayout.Width(240));
             if (enableMemoryGuard)
-                maxRoadPrefabsPerNetwork = EditorGUILayout.IntSlider("Base Max Road Prefabs", maxRoadPrefabsPerNetwork, 500, 200000);
+                EditorGUILayout.HelpBox("Road prefab budget is automatically calculated based on map complexity and available memory.", MessageType.Info);
             GUILayout.EndVertical();
         }
 
