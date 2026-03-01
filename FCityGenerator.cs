@@ -49,6 +49,46 @@ public class FCityGenerator : EditorWindow
     private readonly string[] roadQualityLabels = { "Fast", "Balanced", "High Quality" };
     private int citySizePreset = 3;
 
+    private void ApplyAutomaticRoadSettings()
+    {
+        int safeMainCities = Mathf.Clamp(mainCitiesCount, 1, 10000);
+
+        // Fully automatic multi-city profile based on city count.
+        generateSpiderNetwork = safeMainCities > 1;
+        withSatteliteCity = false;
+        satteliteCitiesCount = Mathf.Clamp(Mathf.CeilToInt(safeMainCities / 3f), 1, 5);
+        borderFlat = !generateSpiderNetwork;
+        smartChainCityRoadNetwork = generateSpiderNetwork;
+        generateCityByCity = true;
+
+        automaticSpiderCounts = true;
+        automaticAdvancedRoadOptions = true;
+        automaticBridgeRouting = true;
+        preventRoadCrossing = true;
+        enforceRoadContinuity = true;
+        enableMemoryGuard = true;
+        smartAdaptiveBudget = true;
+        enableGenerationAnalytics = true;
+        reinforceLowDegreeAnchors = true;
+
+        // Scale quality by network size.
+        roadQualityPreset = safeMainCities <= 3 ? 1 : (safeMainCities <= 8 ? 2 : 0);
+        targetAnchorDegree = safeMainCities <= 4 ? 2 : 3;
+
+        // Keep manual fallback values synced (used only if automation is disabled in runtime logic).
+        float crowdedScale = Mathf.Clamp01(safeMainCities / 12f);
+        continuitySnapBlend = Mathf.Clamp01(0.45f + (crowdedScale * 0.3f));
+        intersectionSafetyDistance = Mathf.Clamp(24f + (crowdedScale * 24f), 5f, 120f);
+        maxRoadSlopeDegrees = Mathf.Clamp(28f - (citySizePreset * 1.8f), 5f, 60f);
+        cityAreaRadius = Mathf.Clamp((1200f + (citySizePreset * 240f) + (crowdedScale * 700f)) * (2.8f + (safeMainCities * 0.08f)), 800f, 30000f);
+        minMainCityDistance = Mathf.Clamp(1200f + (citySizePreset * 240f) + (crowdedScale * 700f), 500f, 3500f);
+        roadSegmentSpacing = Mathf.Clamp(220f - (crowdedScale * 40f) - (citySizePreset * 10f), 50f, 800f);
+        roadClearanceRadius = Mathf.Clamp(10f + (crowdedScale * 8f), 1f, 32f);
+        roadSnapDistance = Mathf.Clamp(16f + (citySizePreset * 2f) + (crowdedScale * 10f), 5f, 80f);
+        bridgeHeightThreshold = Mathf.Clamp(12f + (citySizePreset * 2f) + (crowdedScale * 14f), 3f, 100f);
+        bridgeSmoothing = Mathf.Clamp01(0.55f + (citySizePreset * 0.05f));
+    }
+
 
     private int trafficLightHand = 0;
     private string[] selStrings = { "Right Hand", "Left Hand" };
@@ -178,6 +218,7 @@ public class FCityGenerator : EditorWindow
     {
 
         LoadAssets();
+        ApplyAutomaticRoadSettings();
 
         cityGenerator.generateSpiderNetwork = generateSpiderNetwork;
         cityGenerator.smartChainCityRoadNetwork = smartChainCityRoadNetwork;
@@ -288,92 +329,55 @@ public class FCityGenerator : EditorWindow
             EditorUtility.DisplayDialog("Road Generation Report", cityGenerator.GetLastGenerationReport(), "OK");
         GUILayout.EndHorizontal();
 
-        withSatteliteCity = GUILayout.Toggle(withSatteliteCity, "With Sattelite City", GUILayout.Width(240));
-
-        generateSpiderNetwork = GUILayout.Toggle(generateSpiderNetwork, "Spider Network (Multi-City)", GUILayout.Width(240));
+        mainCitiesCount = EditorGUILayout.IntSlider("Cities Count", mainCitiesCount, 1, 10000);
+        ApplyAutomaticRoadSettings();
+        EditorGUILayout.HelpBox("Multi-city and road-link settings are now fully automatic based on Cities Count.", MessageType.Info);
 
         if (generateSpiderNetwork)
         {
             GUILayout.BeginVertical("box");
             GUILayout.Label("Spider Network Settings", EditorStyles.boldLabel);
-            mainCitiesCount = EditorGUILayout.IntSlider("Main Cities", mainCitiesCount, 1, 10000);
-            smartChainCityRoadNetwork = GUILayout.Toggle(smartChainCityRoadNetwork, "Smart Chain (city -> road -> city)", GUILayout.Width(260));
-            if (smartChainCityRoadNetwork)
-            {
-                EditorGUILayout.HelpBox("Chain branching and step limits are fully automatic based on city count and density.", MessageType.Info);
-            }
-
-            automaticSpiderCounts = GUILayout.Toggle(automaticSpiderCounts, "Automatic for counts", GUILayout.Width(240));
-            if (!automaticSpiderCounts)
-            {
-                subCitiesPerMain = EditorGUILayout.IntSlider("Sub Cities / Main", subCitiesPerMain, 0, 10000);
-                extraRoadLinks = EditorGUILayout.IntSlider("Extra Road Links", extraRoadLinks, 0, 10000);
-            }
-            else
-            {
-                EditorGUILayout.HelpBox("Sub cities and extra links will be calculated automatically based on city size and count.", MessageType.Info);
-            }
-
-            generateCityByCity = GUILayout.Toggle(generateCityByCity, "Generate City by City", GUILayout.Width(240));
+            EditorGUILayout.LabelField("Smart Chain", smartChainCityRoadNetwork ? "Automatic" : "Disabled");
+            EditorGUILayout.LabelField("Sub Cities / Main", subCitiesPerMain.ToString());
+            EditorGUILayout.LabelField("Extra Road Links", extraRoadLinks.ToString());
+            EditorGUILayout.LabelField("Generation Mode", generateCityByCity ? "City by City" : "Batch");
 
             GUILayout.Space(6);
             GUILayout.Label("Professional Road Linking", EditorStyles.boldLabel);
-            automaticAdvancedRoadOptions = GUILayout.Toggle(automaticAdvancedRoadOptions, "Automatic for road linking", GUILayout.Width(240));
-            if (!automaticAdvancedRoadOptions)
-            {
-                cityAreaRadius = EditorGUILayout.Slider("City Area Radius", cityAreaRadius, 800f, 30000f);
-                minMainCityDistance = EditorGUILayout.Slider("Main City Distance", minMainCityDistance, 500f, 3500f);
-                roadSegmentSpacing = EditorGUILayout.Slider("Road Segment Spacing", roadSegmentSpacing, 50f, 800f);
-                roadClearanceRadius = EditorGUILayout.Slider("Collision Clearance", roadClearanceRadius, 1f, 32f);
-                roadSnapDistance = EditorGUILayout.Slider("Building Snap Avoidance", roadSnapDistance, 5f, 80f);
-            }
-            else
-            {
-                EditorGUILayout.HelpBox("Distance/spacing/clearance values will adapt automatically for dense and sparse networks.", MessageType.Info);
-            }
+            EditorGUILayout.HelpBox("Distance/spacing/clearance values adapt automatically for dense and sparse networks.", MessageType.Info);
 
             GUILayout.Space(4);
             GUILayout.Label("Smart Road Integrity", EditorStyles.boldLabel);
-            preventRoadCrossing = GUILayout.Toggle(preventRoadCrossing, "Prevent road crossing/intersections", GUILayout.Width(280));
-            enforceRoadContinuity = GUILayout.Toggle(enforceRoadContinuity, "Enforce continuity and anti-cut roads", GUILayout.Width(280));
-            continuitySnapBlend = EditorGUILayout.Slider("Continuity Snap Blend", continuitySnapBlend, 0f, 1f);
-            intersectionSafetyDistance = EditorGUILayout.Slider("Intersection Safety Distance", intersectionSafetyDistance, 5f, 120f);
-            maxRoadSlopeDegrees = EditorGUILayout.Slider("Max Road Slope", maxRoadSlopeDegrees, 5f, 60f);
+            EditorGUILayout.LabelField("Prevent road crossing", preventRoadCrossing ? "Enabled" : "Disabled");
+            EditorGUILayout.LabelField("Enforce continuity", enforceRoadContinuity ? "Enabled" : "Disabled");
+            EditorGUILayout.LabelField("Continuity Snap Blend", continuitySnapBlend.ToString("0.00"));
+            EditorGUILayout.LabelField("Intersection Safety Distance", intersectionSafetyDistance.ToString("0.0"));
+            EditorGUILayout.LabelField("Max Road Slope", maxRoadSlopeDegrees.ToString("0.0"));
 
             GUILayout.Space(4);
             GUILayout.Label("Bridge + Smart Terrain Routing", EditorStyles.boldLabel);
-            automaticBridgeRouting = GUILayout.Toggle(automaticBridgeRouting, "Automatic bridge routing", GUILayout.Width(240));
-            if (!automaticBridgeRouting)
-            {
-                bridgeHeightThreshold = EditorGUILayout.Slider("Bridge Height Threshold", bridgeHeightThreshold, 3f, 100f);
-                bridgeSmoothing = EditorGUILayout.Slider("Bridge Smoothing", bridgeSmoothing, 0f, 1f);
-            }
+            EditorGUILayout.LabelField("Bridge routing", automaticBridgeRouting ? "Automatic" : "Manual");
+            EditorGUILayout.LabelField("Bridge Height Threshold", bridgeHeightThreshold.ToString("0.0"));
+            EditorGUILayout.LabelField("Bridge Smoothing", bridgeSmoothing.ToString("0.00"));
 
             GUILayout.Space(4);
             GUILayout.Label("Road Quality", EditorStyles.boldLabel);
-            roadQualityPreset = EditorGUILayout.Popup("Quality Preset", roadQualityPreset, roadQualityLabels);
-            enableGenerationAnalytics = GUILayout.Toggle(enableGenerationAnalytics, "Enable generation analytics", GUILayout.Width(240));
-            reinforceLowDegreeAnchors = GUILayout.Toggle(reinforceLowDegreeAnchors, "Reinforce low-degree anchors", GUILayout.Width(240));
-            targetAnchorDegree = EditorGUILayout.IntSlider("Target Anchor Degree", targetAnchorDegree, 1, 4);
+            EditorGUILayout.LabelField("Quality Preset", roadQualityLabels[Mathf.Clamp(roadQualityPreset, 0, roadQualityLabels.Length - 1)]);
+            EditorGUILayout.LabelField("Generation analytics", enableGenerationAnalytics ? "Enabled" : "Disabled");
+            EditorGUILayout.LabelField("Reinforce low-degree anchors", reinforceLowDegreeAnchors ? "Enabled" : "Disabled");
+            EditorGUILayout.LabelField("Target Anchor Degree", targetAnchorDegree.ToString());
 
             GUILayout.Space(4);
             GUILayout.Label("Memory Guard", EditorStyles.boldLabel);
-            enableMemoryGuard = GUILayout.Toggle(enableMemoryGuard, "Limit generated road prefabs", GUILayout.Width(240));
-            smartAdaptiveBudget = GUILayout.Toggle(smartAdaptiveBudget, "Smart adaptive budget", GUILayout.Width(240));
-            if (enableMemoryGuard)
-                EditorGUILayout.HelpBox("Road prefab budget is automatically calculated based on map complexity and available memory.", MessageType.Info);
+            EditorGUILayout.LabelField("Limit generated road prefabs", enableMemoryGuard ? "Enabled" : "Disabled");
+            EditorGUILayout.LabelField("Smart adaptive budget", smartAdaptiveBudget ? "Enabled" : "Disabled");
+            EditorGUILayout.HelpBox("Road prefab budget is automatically calculated based on map complexity and available memory.", MessageType.Info);
             GUILayout.EndVertical();
         }
 
-        if (withSatteliteCity)
-        {
-            satteliteCitiesCount = EditorGUILayout.IntSlider("Sattelite Cities Count", satteliteCitiesCount, 1, 5);
-        }
-        else
-        {
-            GUILayout.Space(10);
-            borderFlat = GUILayout.Toggle(borderFlat, "Border Flat", GUILayout.Width(240));
-        }
+        GUILayout.Space(10);
+        EditorGUILayout.LabelField("Satellite City", withSatteliteCity ? "Automatic" : "Disabled");
+        EditorGUILayout.LabelField("Border Flat", borderFlat ? "Enabled" : "Disabled");
 
         GUILayout.Space(10);
 
