@@ -228,6 +228,11 @@ namespace FCG
                 // Large City
                 satCity = GenerateStreetsBig(borderFlat, withSatteliteCity);
             }
+            else
+            {
+                // Very Large City
+                satCity = GenerateStreetsVeryLarge(borderFlat, withSatteliteCity);
+            }
 
 
             if (satCity)
@@ -260,12 +265,12 @@ namespace FCG
 
         private void ResolveAutomaticSpiderOptions(int primaryCitySize)
         {
-            int safeCitySize = Mathf.Clamp(primaryCitySize, 1, 4);
+            int safeCitySize = Mathf.Clamp(primaryCitySize, 1, 5);
 
             if (automaticSpiderCounts)
             {
                 int targetMainCities = Mathf.Clamp(mainCitiesCount, 1, 10000);
-                float sizeFactor = Mathf.Lerp(0.8f, 1.5f, (safeCitySize - 1f) / 3f);
+                float sizeFactor = Mathf.Lerp(0.8f, 1.7f, (safeCitySize - 1f) / 4f);
 
                 subCitiesPerMain = Mathf.Clamp(Mathf.RoundToInt(Mathf.Max(1f, targetMainCities * 0.45f * sizeFactor)), 0, 10000);
                 extraRoadLinks = Mathf.Clamp(Mathf.RoundToInt(Mathf.Max(1f, targetMainCities * 0.75f * sizeFactor)), 0, 10000);
@@ -274,13 +279,13 @@ namespace FCG
             if (automaticAdvancedRoadOptions)
             {
                 float crowdedScale = Mathf.Clamp01(mainCitiesCount / 12f);
-                minMainCityDistance = Mathf.Clamp(1200f + (safeCitySize * 220f) + (crowdedScale * 700f), 500f, 3500f);
-                roadSegmentSpacing = Mathf.Clamp(220f - (crowdedScale * 40f) - (safeCitySize * 8f), 50f, 800f);
+                minMainCityDistance = Mathf.Clamp(1200f + (safeCitySize * 240f) + (crowdedScale * 700f), 500f, 3500f);
+                roadSegmentSpacing = Mathf.Clamp(220f - (crowdedScale * 40f) - (safeCitySize * 10f), 50f, 800f);
                 roadClearanceRadius = Mathf.Clamp(10f + (crowdedScale * 8f), 1f, 32f);
-                roadSnapDistance = Mathf.Clamp(16f + (safeCitySize * 1.5f) + (crowdedScale * 10f), 5f, 80f);
+                roadSnapDistance = Mathf.Clamp(16f + (safeCitySize * 2f) + (crowdedScale * 10f), 5f, 80f);
                 intercityDistanceThreshold = Mathf.Clamp(minMainCityDistance * 0.62f, 350f, 4000f);
-                cityInfluenceRadius = Mathf.Clamp(260f + (safeCitySize * 55f) + (crowdedScale * 180f), 120f, 1200f);
-                roadTypeBlend = Mathf.Clamp01(0.35f + (safeCitySize * 0.05f));
+                cityInfluenceRadius = Mathf.Clamp(260f + (safeCitySize * 60f) + (crowdedScale * 180f), 120f, 1200f);
+                roadTypeBlend = Mathf.Clamp01(0.33f + (safeCitySize * 0.06f));
             }
 
             if (automaticBridgeRouting)
@@ -297,12 +302,12 @@ namespace FCG
             if (!smartAdaptiveBudget)
                 return baseBudget;
 
-            int safeCitySize = Mathf.Clamp(primaryCitySize, 1, 4);
+            int safeCitySize = Mathf.Clamp(primaryCitySize, 1, 5);
             float memorySizeMB = (float)SystemInfo.systemMemorySize;
             float memoryScale = Mathf.Clamp(memorySizeMB / 8192f, 0.65f, 1.8f);
             float complexity = Mathf.Max(1f, mainCitiesCount + (subCitiesPerMain * 0.5f) + (extraRoadLinks * 0.35f));
             float complexityPenalty = Mathf.Clamp(250f / complexity, 0.35f, 1f);
-            float sizeBoost = Mathf.Lerp(0.85f, 1.25f, (safeCitySize - 1f) / 3f);
+            float sizeBoost = Mathf.Lerp(0.85f, 1.35f, (safeCitySize - 1f) / 4f);
 
             int adaptiveBudget = Mathf.RoundToInt(baseBudget * memoryScale * complexityPenalty * sizeBoost);
             return Mathf.Clamp(adaptiveBudget, 500, 200000);
@@ -372,7 +377,7 @@ namespace FCG
             {
                 for (int mainIndex = 0; mainIndex < maxMainCities; mainIndex++)
                 {
-                    int citySize = (mainIndex == 0) ? primaryCitySize : Random.Range(1, 5);
+                    int citySize = (mainIndex == 0) ? primaryCitySize : Random.Range(1, 6);
                     Vector3 cityOffset = (mainIndex == 0) ? Vector3.zero : RandomCityOffset(cityAnchors);
                     cityAnchors.Add(cityOffset);
                     RegisterCityInfluencePoint(cityOffset, true);
@@ -422,7 +427,7 @@ namespace FCG
                     RegisterCityInfluencePoint(child, true);
                     frontier.Add(childIndex);
 
-                    int citySize = Random.Range(1, 5);
+                    int citySize = Random.Range(1, 6);
                     GenerateCityCluster(citySize, child, borderFlat, safeSatelliteCount, Random.Range(0, 4));
 
                     CreateRoadConnection(parent, child, 0.95f, true);
@@ -1415,6 +1420,131 @@ namespace FCG
 
             return (withSatteliteCity && largeBorderWithExitOfCity.Length > 0);
 
+        }
+
+        private bool GenerateStreetsVeryLarge(bool borderFlat = false, bool withSatteliteCity = false, bool satteliteCity = false)
+        {
+            if (satteliteCity && !cityMaker)
+                satteliteCity = false;
+
+            if (!satteliteCity)
+            {
+                ClearCity();
+                cityMaker = new GameObject("City-Maker");
+            }
+
+            distCenter = 500;
+
+            int largeLength = largeBlocks != null ? largeBlocks.Length : 0;
+            int bigLength = bigLargeBlocks != null ? bigLargeBlocks.Length : 0;
+            if (largeLength == 0 && bigLength == 0)
+                return false;
+
+            _largeBlocks = new bool[Mathf.Max(1, largeLength)];
+            _bigLargeBlocks = new bool[Mathf.Max(1, bigLength)];
+
+            Vector3[] placements = new Vector3[]
+            {
+                new Vector3(0, 0, 0),
+                new Vector3(0, 0, 300),
+                new Vector3(0, 0, 600),
+                new Vector3(-300, 0, 0),
+                new Vector3(300, 0, 0),
+                new Vector3(-300, 0, 300),
+                new Vector3(300, 0, 300),
+                new Vector3(-300, 0, 600),
+                new Vector3(300, 0, 600),
+                new Vector3(-600, 0, 300),
+                new Vector3(600, 0, 300),
+                new Vector3(-450, 0, 150),
+                new Vector3(450, 0, 150),
+                new Vector3(-450, 0, 450),
+                new Vector3(450, 0, 450)
+            };
+
+            for (int i = 0; i < placements.Length; i++)
+            {
+                bool placeBigBlock = (i % 4 == 0 || i % 7 == 0) && bigLength > 0;
+                int rot = Random.Range(0, 4) * 90;
+
+                if (placeBigBlock)
+                {
+                    int idx = Random.Range(0, bigLength);
+                    for (int attempts = 0; attempts < 80; attempts++)
+                    {
+                        if (!_bigLargeBlocks[idx])
+                            break;
+                        idx = Random.Range(0, bigLength);
+                    }
+                    _bigLargeBlocks[idx] = true;
+                    Instantiate(bigLargeBlocks[idx], placements[i], Quaternion.Euler(0, rot, 0), cityMaker.transform);
+                }
+                else if (largeLength > 0)
+                {
+                    int idx = Random.Range(0, largeLength);
+                    for (int attempts = 0; attempts < 80; attempts++)
+                    {
+                        if (!_largeBlocks[idx])
+                            break;
+                        idx = Random.Range(0, largeLength);
+                    }
+                    _largeBlocks[idx] = true;
+                    Instantiate(largeBlocks[idx], placements[i], Quaternion.Euler(0, rot, 0), cityMaker.transform);
+                }
+            }
+
+            GameObject border;
+            if ((withSatteliteCity || satteliteCity) && largeBorderWithExitOfCity.Length > 0)
+            {
+                border = Instantiate(largeBorderWithExitOfCity[Random.Range(0, largeBorderWithExitOfCity.Length)], Vector3.zero, Quaternion.identity, cityMaker.transform);
+            }
+            else
+            {
+                GameObject[] borderSet = borderFlat ? largeBorderFlat : largeBorder;
+                if (borderSet == null || borderSet.Length == 0)
+                    return false;
+
+                border = Instantiate(borderSet[Random.Range(0, borderSet.Length)], Vector3.zero, Quaternion.identity, cityMaker.transform);
+            }
+
+            PopulateSmartRoadGridForVeryLarge();
+
+            border.transform.SetParent(cityMaker.transform);
+            return (withSatteliteCity && largeBorderWithExitOfCity.Length > 0);
+        }
+
+        private void PopulateSmartRoadGridForVeryLarge()
+        {
+            if (cityMaker == null)
+                return;
+
+            Vector3[] roadNodes = new Vector3[]
+            {
+                new Vector3(0, 0, 150),
+                new Vector3(0, 0, 450),
+                new Vector3(-300, 0, 150),
+                new Vector3(300, 0, 150),
+                new Vector3(-300, 0, 450),
+                new Vector3(300, 0, 450),
+                new Vector3(-600, 0, 300),
+                new Vector3(600, 0, 300),
+                new Vector3(-150, 0, 300),
+                new Vector3(150, 0, 300)
+            };
+
+            for (int i = 0; i < roadNodes.Length; i++)
+            {
+                Vector3 roadPos = SnapRoadToGround(roadNodes[i]);
+                float distance = Vector3.Distance(Vector3.zero, roadPos);
+                float influence = Mathf.Clamp01(1f - (distance / Mathf.Max(500f, cityInfluenceRadius)));
+                float intercityFactor = Mathf.Clamp01(distance / Mathf.Max(300f, intercityDistanceThreshold));
+                GameObject[] roadPrefabs = SelectRoadPrefabsForConnection(0.9f, distance, influence, intercityFactor, 0.5f);
+                if (roadPrefabs == null || roadPrefabs.Length == 0)
+                    continue;
+
+                Quaternion rotation = (Mathf.Abs(roadPos.x) > Mathf.Abs(roadPos.z)) ? Quaternion.Euler(0, 90, 0) : Quaternion.identity;
+                Instantiate(roadPrefabs[Random.Range(0, roadPrefabs.Length)], roadPos, rotation, cityMaker.transform);
+            }
         }
 
         private GameObject pB;
