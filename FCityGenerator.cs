@@ -19,6 +19,10 @@ public class FCityGenerator : EditorWindow
     private bool withSatteliteCity = false;
     private int satteliteCitiesCount = 1;
     private bool borderFlat = false;
+    private bool generateSpiderNetwork = false;
+    private int mainCitiesCount = 3;
+    private int subCitiesPerMain = 2;
+    private int extraRoadLinks = 2;
 
 
     private int trafficLightHand = 0;
@@ -149,6 +153,11 @@ public class FCityGenerator : EditorWindow
     {
 
         LoadAssets();
+
+        cityGenerator.generateSpiderNetwork = generateSpiderNetwork;
+        cityGenerator.mainCitiesCount = mainCitiesCount;
+        cityGenerator.subCitiesPerMain = subCitiesPerMain;
+        cityGenerator.extraRoadLinks = extraRoadLinks;
         
         cityGenerator.GenerateCity(size, withSatteliteCity, borderFlat, satteliteCitiesCount);
 
@@ -237,6 +246,15 @@ public class FCityGenerator : EditorWindow
 
 
         withSatteliteCity = GUILayout.Toggle(withSatteliteCity, "With Sattelite City", GUILayout.Width(240));
+
+        generateSpiderNetwork = GUILayout.Toggle(generateSpiderNetwork, "Spider Network (Multi-City)", GUILayout.Width(240));
+
+        if (generateSpiderNetwork)
+        {
+            mainCitiesCount = EditorGUILayout.IntSlider("Main Cities", mainCitiesCount, 2, 6);
+            subCitiesPerMain = EditorGUILayout.IntSlider("Sub Cities / Main", subCitiesPerMain, 0, 4);
+            extraRoadLinks = EditorGUILayout.IntSlider("Extra Road Links", extraRoadLinks, 1, 4);
+        }
 
         if (withSatteliteCity)
         {
