@@ -28,6 +28,12 @@ public class FCityGenerator : EditorWindow
     private bool automaticSpiderCounts = true;
     private bool automaticAdvancedRoadOptions = true;
     private bool automaticBridgeRouting = true;
+    private bool preventRoadCrossing = true;
+    private bool enforceRoadContinuity = true;
+    private float continuitySnapBlend = 0.55f;
+    private float intersectionSafetyDistance = 30f;
+    private float maxRoadSlopeDegrees = 26f;
+    private float cityAreaRadius = 6000f;
     private float minMainCityDistance = 1500f;
     private float roadSegmentSpacing = 240f;
     private float roadClearanceRadius = 10f;
@@ -36,6 +42,12 @@ public class FCityGenerator : EditorWindow
     private float bridgeSmoothing = 0.65f;
     private bool enableMemoryGuard = true;
     private bool smartAdaptiveBudget = true;
+    private int roadQualityPreset = 1;
+    private bool enableGenerationAnalytics = true;
+    private bool reinforceLowDegreeAnchors = true;
+    private int targetAnchorDegree = 2;
+    private readonly string[] roadQualityLabels = { "Fast", "Balanced", "High Quality" };
+    private int citySizePreset = 3;
 
 
     private int trafficLightHand = 0;
@@ -176,6 +188,12 @@ public class FCityGenerator : EditorWindow
         cityGenerator.automaticSpiderCounts = automaticSpiderCounts;
         cityGenerator.automaticAdvancedRoadOptions = automaticAdvancedRoadOptions;
         cityGenerator.automaticBridgeRouting = automaticBridgeRouting;
+        cityGenerator.preventRoadCrossing = preventRoadCrossing;
+        cityGenerator.enforceRoadContinuity = enforceRoadContinuity;
+        cityGenerator.continuitySnapBlend = continuitySnapBlend;
+        cityGenerator.intersectionSafetyDistance = intersectionSafetyDistance;
+        cityGenerator.maxRoadSlopeDegrees = maxRoadSlopeDegrees;
+        cityGenerator.cityAreaRadius = cityAreaRadius;
         cityGenerator.minMainCityDistance = minMainCityDistance;
         cityGenerator.roadSegmentSpacing = roadSegmentSpacing;
         cityGenerator.roadClearanceRadius = roadClearanceRadius;
@@ -184,6 +202,10 @@ public class FCityGenerator : EditorWindow
         cityGenerator.bridgeSmoothing = bridgeSmoothing;
         cityGenerator.enableMemoryGuard = enableMemoryGuard;
         cityGenerator.smartAdaptiveBudget = smartAdaptiveBudget;
+        cityGenerator.roadQualityPreset = roadQualityPreset;
+        cityGenerator.enableGenerationAnalytics = enableGenerationAnalytics;
+        cityGenerator.reinforceLowDegreeAnchors = reinforceLowDegreeAnchors;
+        cityGenerator.targetAnchorDegree = targetAnchorDegree;
 
         cityGenerator.GenerateCity(size, withSatteliteCity, borderFlat, satteliteCitiesCount);
 
@@ -251,25 +273,20 @@ public class FCityGenerator : EditorWindow
 
         GUILayout.BeginHorizontal("box");
 
-        if (GUILayout.Button("Small"))
-            GenerateCity(1, borderFlat);
-
-
-        if (GUILayout.Button("Medium"))
-            GenerateCity(2, borderFlat);
-
-        if (GUILayout.Button("Large"))
-            GenerateCity(3, borderFlat);
-
-        if (GUILayout.Button("Very Large"))
-            GenerateCity(5, borderFlat);
-
-
-        GUILayout.Space(5);
-
+        GUILayout.Label("City Size", GUILayout.Width(60));
+        citySizePreset = EditorGUILayout.IntSlider(citySizePreset, 1, 5);
+        if (GUILayout.Button("Generate City", GUILayout.Width(140)))
+            GenerateCity(citySizePreset, borderFlat);
 
         GUILayout.EndHorizontal();
 
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("Regenerate Roads Only", GUILayout.Width(180)))
+            GenerateCity(citySizePreset, borderFlat);
+
+        if (GUILayout.Button("Analyze Last Generation", GUILayout.Width(180)) && cityGenerator)
+            EditorUtility.DisplayDialog("Road Generation Report", cityGenerator.GetLastGenerationReport(), "OK");
+        GUILayout.EndHorizontal();
 
         withSatteliteCity = GUILayout.Toggle(withSatteliteCity, "With Sattelite City", GUILayout.Width(240));
 
@@ -304,6 +321,7 @@ public class FCityGenerator : EditorWindow
             automaticAdvancedRoadOptions = GUILayout.Toggle(automaticAdvancedRoadOptions, "Automatic for road linking", GUILayout.Width(240));
             if (!automaticAdvancedRoadOptions)
             {
+                cityAreaRadius = EditorGUILayout.Slider("City Area Radius", cityAreaRadius, 800f, 30000f);
                 minMainCityDistance = EditorGUILayout.Slider("Main City Distance", minMainCityDistance, 500f, 3500f);
                 roadSegmentSpacing = EditorGUILayout.Slider("Road Segment Spacing", roadSegmentSpacing, 50f, 800f);
                 roadClearanceRadius = EditorGUILayout.Slider("Collision Clearance", roadClearanceRadius, 1f, 32f);
@@ -315,6 +333,14 @@ public class FCityGenerator : EditorWindow
             }
 
             GUILayout.Space(4);
+            GUILayout.Label("Smart Road Integrity", EditorStyles.boldLabel);
+            preventRoadCrossing = GUILayout.Toggle(preventRoadCrossing, "Prevent road crossing/intersections", GUILayout.Width(280));
+            enforceRoadContinuity = GUILayout.Toggle(enforceRoadContinuity, "Enforce continuity and anti-cut roads", GUILayout.Width(280));
+            continuitySnapBlend = EditorGUILayout.Slider("Continuity Snap Blend", continuitySnapBlend, 0f, 1f);
+            intersectionSafetyDistance = EditorGUILayout.Slider("Intersection Safety Distance", intersectionSafetyDistance, 5f, 120f);
+            maxRoadSlopeDegrees = EditorGUILayout.Slider("Max Road Slope", maxRoadSlopeDegrees, 5f, 60f);
+
+            GUILayout.Space(4);
             GUILayout.Label("Bridge + Smart Terrain Routing", EditorStyles.boldLabel);
             automaticBridgeRouting = GUILayout.Toggle(automaticBridgeRouting, "Automatic bridge routing", GUILayout.Width(240));
             if (!automaticBridgeRouting)
@@ -322,6 +348,13 @@ public class FCityGenerator : EditorWindow
                 bridgeHeightThreshold = EditorGUILayout.Slider("Bridge Height Threshold", bridgeHeightThreshold, 3f, 100f);
                 bridgeSmoothing = EditorGUILayout.Slider("Bridge Smoothing", bridgeSmoothing, 0f, 1f);
             }
+
+            GUILayout.Space(4);
+            GUILayout.Label("Road Quality", EditorStyles.boldLabel);
+            roadQualityPreset = EditorGUILayout.Popup("Quality Preset", roadQualityPreset, roadQualityLabels);
+            enableGenerationAnalytics = GUILayout.Toggle(enableGenerationAnalytics, "Enable generation analytics", GUILayout.Width(240));
+            reinforceLowDegreeAnchors = GUILayout.Toggle(reinforceLowDegreeAnchors, "Reinforce low-degree anchors", GUILayout.Width(240));
+            targetAnchorDegree = EditorGUILayout.IntSlider("Target Anchor Degree", targetAnchorDegree, 1, 4);
 
             GUILayout.Space(4);
             GUILayout.Label("Memory Guard", EditorStyles.boldLabel);
