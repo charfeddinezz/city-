@@ -166,8 +166,18 @@ namespace FCG
         [Range(0f, 1f)]
         public float bridgeSmoothing = 0.65f;
 
+        [Header("Intelligent Road Typing")]
+        public bool smartRoadTypeSelection = true;
+        [Range(350f, 4000f)]
+        public float intercityDistanceThreshold = 900f;
+        [Range(120f, 1200f)]
+        public float cityInfluenceRadius = 420f;
+        [Range(0f, 1f)]
+        public float roadTypeBlend = 0.45f;
+
         private readonly System.Collections.Generic.HashSet<string> roadLinks = new System.Collections.Generic.HashSet<string>();
         private readonly Collider[] roadOverlapBuffer = new Collider[96];
+        private readonly System.Collections.Generic.List<Vector3> cityInfluencePoints = new System.Collections.Generic.List<Vector3>();
 
         [Header("Memory Guard")]
         public bool enableMemoryGuard = true;
@@ -268,6 +278,9 @@ namespace FCG
                 roadSegmentSpacing = Mathf.Clamp(220f - (crowdedScale * 40f) - (safeCitySize * 8f), 50f, 800f);
                 roadClearanceRadius = Mathf.Clamp(10f + (crowdedScale * 8f), 1f, 32f);
                 roadSnapDistance = Mathf.Clamp(16f + (safeCitySize * 1.5f) + (crowdedScale * 10f), 5f, 80f);
+                intercityDistanceThreshold = Mathf.Clamp(minMainCityDistance * 0.62f, 350f, 4000f);
+                cityInfluenceRadius = Mathf.Clamp(260f + (safeCitySize * 55f) + (crowdedScale * 180f), 120f, 1200f);
+                roadTypeBlend = Mathf.Clamp01(0.35f + (safeCitySize * 0.05f));
             }
 
             if (automaticBridgeRouting)
@@ -339,6 +352,7 @@ namespace FCG
             ClearCity();
             cityMaker = new GameObject("City-Maker");
             roadLinks.Clear();
+            cityInfluencePoints.Clear();
             placedRoadPrefabsInCurrentNetwork = 0;
             adaptiveRoadPrefabBudget = CalculateAdaptiveRoadBudget(primaryCitySize);
 
@@ -361,6 +375,7 @@ namespace FCG
                     int citySize = (mainIndex == 0) ? primaryCitySize : Random.Range(1, 5);
                     Vector3 cityOffset = (mainIndex == 0) ? Vector3.zero : RandomCityOffset(cityAnchors);
                     cityAnchors.Add(cityOffset);
+                    RegisterCityInfluencePoint(cityOffset, true);
 
                     int borderType = Random.Range(0, 4);
                     GenerateCityCluster(citySize, cityOffset, borderFlat, satellitesPerMainCity, borderType);
@@ -386,6 +401,7 @@ namespace FCG
             int safeSatelliteCount = Mathf.Clamp(satellitesPerMainCity, 0, Mathf.Min(24, subCitiesPerMain + 4));
 
             cityAnchors.Add(Vector3.zero);
+            RegisterCityInfluencePoint(Vector3.zero, true);
             GenerateCityCluster(primaryCitySize, Vector3.zero, borderFlat, safeSatelliteCount, Random.Range(0, 4));
 
             var frontier = new System.Collections.Generic.List<int>(maxMainCities);
@@ -403,6 +419,7 @@ namespace FCG
                     Vector3 child = RandomChainedCityOffset(parent, cityAnchors);
                     int childIndex = cityAnchors.Count;
                     cityAnchors.Add(child);
+                    RegisterCityInfluencePoint(child, true);
                     frontier.Add(childIndex);
 
                     int citySize = Random.Range(1, 5);
@@ -511,6 +528,7 @@ namespace FCG
             for (int satelliteIndex = 0; satelliteIndex < satellitesToSpawn; satelliteIndex++)
             {
                 Vector3 satOffset = offset + Quaternion.Euler(0, satelliteIndex * (360f / Mathf.Max(1, satellitesToSpawn)), 0) * new Vector3(0, 0, Random.Range(700f, 1200f));
+                RegisterCityInfluencePoint(satOffset, false);
                 GenerateSubCity(satOffset, borderFlat);
                 CreateRoadConnection(offset, satOffset, 0.65f, true);
             }
@@ -531,6 +549,92 @@ namespace FCG
             }
 
             Instantiate(subBorder[Random.Range(0, subBorder.Length)], offset, Quaternion.Euler(0, Random.Range(0, 4) * 90f, 0), cityMaker.transform);
+            RegisterCityInfluencePoint(offset, false);
+        }
+
+        private void RegisterCityInfluencePoint(Vector3 point, bool isMainCity)
+        {
+            if (cityInfluencePoints.Count >= 20000)
+                return;
+
+            float mergeDistance = isMainCity ? cityInfluenceRadius * 0.7f : cityInfluenceRadius * 0.45f;
+            mergeDistance = Mathf.Max(60f, mergeDistance);
+
+            for (int i = 0; i < cityInfluencePoints.Count; i++)
+            {
+                if (Vector3.Distance(cityInfluencePoints[i], point) <= mergeDistance)
+                    return;
+            }
+
+            cityInfluencePoints.Add(point);
+        }
+
+        private float SampleCityInfluence(Vector3 position)
+        {
+            if (!smartRoadTypeSelection || cityInfluencePoints.Count == 0)
+                return 0f;
+
+            float nearest = float.MaxValue;
+            float secondary = float.MaxValue;
+
+            for (int i = 0; i < cityInfluencePoints.Count; i++)
+            {
+                float d = Vector3.Distance(position, cityInfluencePoints[i]);
+                if (d < nearest)
+                {
+                    secondary = nearest;
+                    nearest = d;
+                }
+                else if (d < secondary)
+                {
+                    secondary = d;
+                }
+            }
+
+            float nearestInfluence = 1f - Mathf.Clamp01(nearest / Mathf.Max(120f, cityInfluenceRadius));
+            float secondaryInfluence = secondary < float.MaxValue ? 1f - Mathf.Clamp01(secondary / Mathf.Max(180f, cityInfluenceRadius * 1.5f)) : 0f;
+
+            return Mathf.Clamp01(Mathf.Lerp(nearestInfluence, Mathf.Max(nearestInfluence, secondaryInfluence), roadTypeBlend));
+        }
+
+        private GameObject[] GetRoadPrefabSetByTier(int tier)
+        {
+            if (tier <= 0)
+            {
+                if (forward50 != null && forward50.Length > 0)
+                    return forward50;
+                if (forward100 != null && forward100.Length > 0)
+                    return forward100;
+            }
+            else if (tier == 1)
+            {
+                if (forward100 != null && forward100.Length > 0)
+                    return forward100;
+                if (forward300 != null && forward300.Length > 0)
+                    return forward300;
+            }
+            else if (tier == 2)
+            {
+                if (forward300 != null && forward300.Length > 0)
+                    return forward300;
+                if (forward400 != null && forward400.Length > 0)
+                    return forward400;
+            }
+            else
+            {
+                if (forward400 != null && forward400.Length > 0)
+                    return forward400;
+                if (forward300 != null && forward300.Length > 0)
+                    return forward300;
+            }
+
+            if (forward50 != null && forward50.Length > 0)
+                return forward50;
+            if (forward100 != null && forward100.Length > 0)
+                return forward100;
+            if (forward300 != null && forward300.Length > 0)
+                return forward300;
+            return (forward400 != null && forward400.Length > 0) ? forward400 : null;
         }
 
         private GameObject[] GetBorderBySize(int citySize, bool borderFlat, bool withExit)
@@ -638,9 +742,6 @@ namespace FCG
         private void CreateRoadConnection(Vector3 start, Vector3 end, float density, bool preventDuplicates = false)
         {
             float estimatedDistance = Vector3.Distance(start, end);
-            GameObject[] roadChoices = SelectRoadPrefabsForConnection(density, estimatedDistance);
-            if (roadChoices == null || roadChoices.Length == 0)
-                return;
 
             if (preventDuplicates && !ReserveRoadLink(start, end))
                 return;
@@ -661,6 +762,7 @@ namespace FCG
             float endGround = SampleGroundHeight(end);
             float endPointHeightDelta = Mathf.Abs(endGround - startGround);
             bool canBridge = automaticBridgeRouting && endPointHeightDelta >= bridgeHeightThreshold;
+            float intercityFactor = Mathf.Clamp01((estimatedDistance - Mathf.Max(250f, intercityDistanceThreshold * 0.45f)) / Mathf.Max(250f, intercityDistanceThreshold));
 
             for (int segmentIndex = 0; segmentIndex <= segments; segmentIndex++)
             {
@@ -692,7 +794,13 @@ namespace FCG
                     roadPos.y = desiredHeight;
                 }
 
-                if (RoadPointHasCollision(roadPos) || IsRoadNearBridge(roadPos))
+                float cityInfluence = SampleCityInfluence(roadPos);
+                GameObject[] roadChoices = SelectRoadPrefabsForConnection(density, estimatedDistance, cityInfluence, intercityFactor, t);
+                if (roadChoices == null || roadChoices.Length == 0)
+                    continue;
+
+                float collisionRadius = Mathf.Lerp(roadClearanceRadius * 0.8f, roadClearanceRadius * 1.2f, Mathf.Clamp01(1f - cityInfluence));
+                if (RoadPointHasCollision(roadPos, collisionRadius) || IsRoadNearBridge(roadPos))
                     continue;
 
                 if (enableMemoryGuard && placedRoadPrefabsInCurrentNetwork >= Mathf.Max(500, adaptiveRoadPrefabBudget))
@@ -703,47 +811,39 @@ namespace FCG
             }
         }
 
-        private GameObject[] SelectRoadPrefabsForConnection(float density, float distance)
+        private GameObject[] SelectRoadPrefabsForConnection(float density, float distance, float cityInfluence, float intercityFactor, float segmentT)
         {
-            bool longDistance = distance >= 1200f;
-            bool mediumDistance = distance >= 650f;
+            bool longDistance = distance >= Mathf.Max(1000f, intercityDistanceThreshold * 1.15f);
+            bool mediumDistance = distance >= Mathf.Max(500f, intercityDistanceThreshold * 0.7f);
             bool highDensity = density >= 0.85f;
             bool mediumDensity = density >= 0.65f;
 
-            if (longDistance)
+            if (!smartRoadTypeSelection)
             {
-                if (forward400 != null && forward400.Length > 0)
-                    return forward400;
-                if (forward300 != null && forward300.Length > 0)
-                    return forward300;
+                if (longDistance)
+                    return GetRoadPrefabSetByTier(3);
+                if (mediumDistance || highDensity)
+                    return GetRoadPrefabSetByTier(2);
+                if (mediumDensity)
+                    return GetRoadPrefabSetByTier(1);
+                return GetRoadPrefabSetByTier(0);
             }
 
-            if (mediumDistance || highDensity)
-            {
-                if (forward300 != null && forward300.Length > 0)
-                    return forward300;
-                if (forward400 != null && forward400.Length > 0)
-                    return forward400;
-                if (forward100 != null && forward100.Length > 0)
-                    return forward100;
-            }
+            float corridor = 1f - Mathf.Abs((segmentT * 2f) - 1f);
+            float corridorIntercityBoost = corridor * intercityFactor * 0.35f;
+            float outsideScore = Mathf.Clamp01((1f - cityInfluence) * 0.65f + intercityFactor * 0.55f + corridorIntercityBoost);
+            float insideScore = Mathf.Clamp01(cityInfluence * 0.8f + density * 0.2f);
 
-            if (mediumDensity)
-            {
-                if (forward100 != null && forward100.Length > 0)
-                    return forward100;
-                if (forward50 != null && forward50.Length > 0)
-                    return forward50;
-            }
+            if (outsideScore >= 0.78f || longDistance)
+                return GetRoadPrefabSetByTier(3);
 
-            if (forward50 != null && forward50.Length > 0)
-                return forward50;
-            if (forward100 != null && forward100.Length > 0)
-                return forward100;
-            if (forward300 != null && forward300.Length > 0)
-                return forward300;
+            if (outsideScore >= 0.55f || (mediumDistance && cityInfluence < 0.45f))
+                return GetRoadPrefabSetByTier(2);
 
-            return (forward400 != null && forward400.Length > 0) ? forward400 : null;
+            if (insideScore >= 0.62f || mediumDensity || highDensity)
+                return GetRoadPrefabSetByTier(1);
+
+            return GetRoadPrefabSetByTier(0);
         }
 
         private bool ReserveRoadLink(Vector3 a, Vector3 b)
@@ -777,9 +877,9 @@ namespace FCG
             return SnapRoadToGround(position).y;
         }
 
-        private bool RoadPointHasCollision(Vector3 position)
+        private bool RoadPointHasCollision(Vector3 position, float clearanceRadius)
         {
-            int overlapCount = Physics.OverlapSphereNonAlloc(position + Vector3.up * 2f, roadClearanceRadius, roadOverlapBuffer);
+            int overlapCount = Physics.OverlapSphereNonAlloc(position + Vector3.up * 2f, Mathf.Max(1f, clearanceRadius), roadOverlapBuffer);
             for (int i = 0; i < overlapCount; i++)
             {
                 Collider current = roadOverlapBuffer[i];
@@ -803,7 +903,7 @@ namespace FCG
                     if (!child)
                         continue;
 
-                    if (Vector3.Distance(child.position, position) < roadSnapDistance)
+                    if (Vector3.Distance(child.position, position) < Mathf.Max(4f, roadSnapDistance * 0.85f))
                     {
                         string lowerName = child.name.ToLowerInvariant();
                         if (!lowerName.Contains("road") && !lowerName.Contains("street") && !lowerName.Contains("exit"))
