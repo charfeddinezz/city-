@@ -709,6 +709,8 @@ namespace FCG
                 if (second >= 0)
                     CreateRoadConnection(anchors[i], anchors[second], Mathf.Clamp01(density * 0.85f), true);
             }
+
+            EnsureAnchorConnectivity(anchors, Mathf.Clamp01(density + 0.1f));
         }
 
         private void GenerateSpiderNetwork(int primaryCitySize, bool borderFlat, int defaultSatelliteCount)
@@ -1243,17 +1245,32 @@ namespace FCG
             return nearestIndex;
         }
 
-        private void CreateRoadConnection(Vector3 start, Vector3 end, float density, bool preventDuplicates = false)
+        private bool CreateRoadConnection(Vector3 start, Vector3 end, float density, bool preventDuplicates = false)
+        {
+            if (TryCreateRoadConnectionInternal(start, end, density, preventDuplicates))
+                return true;
+
+            if (!preventDuplicates)
+                return false;
+
+            return TryCreateDetourRoadConnection(start, end, density);
+        }
+
+        private bool TryCreateRoadConnectionInternal(Vector3 start, Vector3 end, float density, bool preventDuplicates)
         {
             float estimatedDistance = Vector3.Distance(start, end);
+            if (estimatedDistance < 10f)
+                return false;
 
-            if (preventDuplicates && !ReserveRoadLink(start, end))
-                return;
+            string roadLinkKey = null;
+            RoadSegment2D reservedSegment = new RoadSegment2D();
+            if (preventDuplicates && !TryReserveRoadLink(start, end, out roadLinkKey, out reservedSegment))
+                return false;
 
             Vector3 delta = end - start;
             float distance = delta.magnitude;
             if (distance < 10f)
-                return;
+                return false;
 
             Vector3 direction = delta.normalized;
             Quaternion rotation = Quaternion.LookRotation(direction, Vector3.up);
@@ -1268,6 +1285,7 @@ namespace FCG
             bool canBridge = automaticBridgeRouting && endPointHeightDelta >= bridgeHeightThreshold;
             float intercityFactor = Mathf.Clamp01((estimatedDistance - Mathf.Max(250f, intercityDistanceThreshold * 0.45f)) / Mathf.Max(250f, intercityDistanceThreshold));
 
+            int placedSegments = 0;
             for (int segmentIndex = 0; segmentIndex <= segments; segmentIndex++)
             {
                 float t = segmentIndex / (float)segments;
@@ -1318,7 +1336,48 @@ namespace FCG
                 Instantiate(roadChoices[Random.Range(0, roadChoices.Length)], placementPos, rotation, cityMaker.transform);
                 RegisterRoadNode(placementPos);
                 placedRoadPrefabsInCurrentNetwork++;
+                placedSegments++;
             }
+
+            if (placedSegments == 0)
+                return false;
+
+            if (preventDuplicates)
+                CommitReservedRoadLink(roadLinkKey, reservedSegment);
+
+            return true;
+        }
+
+        private bool TryCreateDetourRoadConnection(Vector3 start, Vector3 end, float density)
+        {
+            float distance = Vector3.Distance(start, end);
+            if (distance < 18f)
+                return false;
+
+            Vector3 direction = (end - start).normalized;
+            Vector3 side = Vector3.Cross(Vector3.up, direction).normalized;
+            Vector3 mid = Vector3.Lerp(start, end, 0.5f);
+
+            float firstOffset = Mathf.Clamp(distance * 0.2f, 24f, Mathf.Min(220f, distance * 0.45f));
+            float secondOffset = Mathf.Clamp(distance * 0.32f, 36f, Mathf.Min(300f, distance * 0.5f));
+            float[] offsets = new float[] { firstOffset, -firstOffset, secondOffset, -secondOffset };
+
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                Vector3 waypoint = SnapRoadToGround(mid + side * offsets[i]);
+                if (RoadPointHasCollision(waypoint, Mathf.Max(roadClearanceRadius, roadClearanceRadius * 1.15f)) || IsRoadNearBridge(waypoint))
+                    continue;
+
+                if (!CanReserveRoadLink(start, waypoint) || !CanReserveRoadLink(waypoint, end))
+                    continue;
+
+                bool firstLeg = TryCreateRoadConnectionInternal(start, waypoint, Mathf.Clamp01(density + 0.1f), true);
+                bool secondLeg = TryCreateRoadConnectionInternal(waypoint, end, Mathf.Clamp01(density + 0.1f), true);
+                if (firstLeg && secondLeg)
+                    return true;
+            }
+
+            return false;
         }
 
         private GameObject[] SelectRoadPrefabsForConnection(float density, float distance, float cityInfluence, float intercityFactor, float segmentT)
@@ -1356,41 +1415,177 @@ namespace FCG
             return GetRoadPrefabSetByTier(0);
         }
 
-        private bool ReserveRoadLink(Vector3 a, Vector3 b)
+        private bool CanReserveRoadLink(Vector3 a, Vector3 b)
+        {
+            string key;
+            RoadSegment2D segment;
+            return BuildRoadLinkReservation(a, b, false, out key, out segment);
+        }
+
+        private bool TryReserveRoadLink(Vector3 a, Vector3 b, out string key, out RoadSegment2D segment)
+        {
+            return BuildRoadLinkReservation(a, b, true, out key, out segment);
+        }
+
+        private bool BuildRoadLinkReservation(Vector3 a, Vector3 b, bool trackAnalytics, out string key, out RoadSegment2D segment)
         {
             string first = Mathf.RoundToInt(a.x) + "_" + Mathf.RoundToInt(a.z);
             string second = Mathf.RoundToInt(b.x) + "_" + Mathf.RoundToInt(b.z);
-            string key = string.CompareOrdinal(first, second) < 0 ? first + "-" + second : second + "-" + first;
+            key = string.CompareOrdinal(first, second) < 0 ? first + "-" + second : second + "-" + first;
+            segment = new RoadSegment2D(new Vector2(a.x, a.z), new Vector2(b.x, b.z));
 
-            analyticsLinksAttempted++;
+            if (trackAnalytics)
+                analyticsLinksAttempted++;
+
             if (roadLinks.Contains(key))
             {
-                analyticsLinksRejectedDuplicate++;
+                if (trackAnalytics)
+                    analyticsLinksRejectedDuplicate++;
                 return false;
             }
 
             if (preventRoadCrossing)
             {
-                Vector2 start = new Vector2(a.x, a.z);
-                Vector2 end = new Vector2(b.x, b.z);
+                Vector2 start = segment.a;
+                Vector2 end = segment.b;
                 if (WouldCrossExistingRoad(start, end))
                 {
-                    analyticsLinksRejectedCrossing++;
+                    if (trackAnalytics)
+                        analyticsLinksRejectedCrossing++;
                     return false;
                 }
 
                 if (IsSegmentTooCloseToExisting(start, end, Mathf.Max(10f, roadSnapDistance * 0.9f)))
                 {
-                    analyticsLinksRejectedTooClose++;
+                    if (trackAnalytics)
+                        analyticsLinksRejectedTooClose++;
                     return false;
                 }
-
-                reservedRoadSegments.Add(new RoadSegment2D(start, end));
             }
+
+            return true;
+        }
+
+        private void CommitReservedRoadLink(string key, RoadSegment2D segment)
+        {
+            if (string.IsNullOrEmpty(key) || roadLinks.Contains(key))
+                return;
+
+            if (preventRoadCrossing)
+                reservedRoadSegments.Add(segment);
 
             roadLinks.Add(key);
             analyticsLinksAccepted++;
-            return true;
+        }
+
+        private void EnsureAnchorConnectivity(System.Collections.Generic.List<Vector3> anchors, float density)
+        {
+            if (anchors == null || anchors.Count < 2)
+                return;
+
+            int guard = Mathf.Clamp(anchors.Count * 3, 4, 10000);
+            while (guard-- > 0)
+            {
+                int[] components = BuildAnchorComponents(anchors);
+                int root = components[0];
+                bool allConnected = true;
+                for (int i = 1; i < components.Length; i++)
+                {
+                    if (components[i] != root)
+                    {
+                        allConnected = false;
+                        break;
+                    }
+                }
+
+                if (allConnected)
+                    return;
+
+                int bestA = -1;
+                int bestB = -1;
+                float bestDistance = float.MaxValue;
+
+                for (int i = 0; i < anchors.Count; i++)
+                {
+                    for (int j = i + 1; j < anchors.Count; j++)
+                    {
+                        if (components[i] == components[j])
+                            continue;
+
+                        float d = Vector3.Distance(anchors[i], anchors[j]);
+                        if (d < bestDistance)
+                        {
+                            bestDistance = d;
+                            bestA = i;
+                            bestB = j;
+                        }
+                    }
+                }
+
+                if (bestA < 0 || !CreateRoadConnection(anchors[bestA], anchors[bestB], density, true))
+                    return;
+            }
+        }
+
+        private int[] BuildAnchorComponents(System.Collections.Generic.List<Vector3> anchors)
+        {
+            int count = anchors.Count;
+            int[] parents = new int[count];
+            for (int i = 0; i < count; i++)
+                parents[i] = i;
+
+            float endpointTolerance = Mathf.Max(40f, roadSnapDistance * 2.1f);
+            for (int i = 0; i < reservedRoadSegments.Count; i++)
+            {
+                RoadSegment2D segment = reservedRoadSegments[i];
+                int aIndex = FindClosestAnchorWithinDistance(anchors, segment.a, endpointTolerance);
+                int bIndex = FindClosestAnchorWithinDistance(anchors, segment.b, endpointTolerance);
+                if (aIndex >= 0 && bIndex >= 0 && aIndex != bIndex)
+                    UnionAnchorComponent(parents, aIndex, bIndex);
+            }
+
+            for (int i = 0; i < count; i++)
+                parents[i] = FindAnchorComponent(parents, i);
+
+            return parents;
+        }
+
+        private int FindClosestAnchorWithinDistance(System.Collections.Generic.List<Vector3> anchors, Vector2 point, float maxDistance)
+        {
+            float best = maxDistance;
+            int bestIndex = -1;
+
+            for (int i = 0; i < anchors.Count; i++)
+            {
+                Vector2 anchor2D = new Vector2(anchors[i].x, anchors[i].z);
+                float d = Vector2.Distance(anchor2D, point);
+                if (d < best)
+                {
+                    best = d;
+                    bestIndex = i;
+                }
+            }
+
+            return bestIndex;
+        }
+
+        private int FindAnchorComponent(int[] parents, int index)
+        {
+            while (parents[index] != index)
+            {
+                parents[index] = parents[parents[index]];
+                index = parents[index];
+            }
+
+            return index;
+        }
+
+        private void UnionAnchorComponent(int[] parents, int a, int b)
+        {
+            int rootA = FindAnchorComponent(parents, a);
+            int rootB = FindAnchorComponent(parents, b);
+            if (rootA != rootB)
+                parents[rootB] = rootA;
         }
 
         private bool WouldCrossExistingRoad(Vector2 start, Vector2 end)
