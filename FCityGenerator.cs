@@ -17,6 +17,7 @@ public class FCityGenerator : EditorWindow
     private float downTownSize = 100;
 
     private bool withSatteliteCity = false;
+    private int satteliteCitiesCount = 1;
     private bool borderFlat = false;
 
 
@@ -149,7 +150,7 @@ public class FCityGenerator : EditorWindow
 
         LoadAssets();
         
-        cityGenerator.GenerateCity(size, withSatteliteCity, borderFlat);
+        cityGenerator.GenerateCity(size, withSatteliteCity, borderFlat, satteliteCitiesCount);
 
         if (trafficSystem)
         {
@@ -237,7 +238,11 @@ public class FCityGenerator : EditorWindow
 
         withSatteliteCity = GUILayout.Toggle(withSatteliteCity, "With Sattelite City", GUILayout.Width(240));
 
-        if (!withSatteliteCity)
+        if (withSatteliteCity)
+        {
+            satteliteCitiesCount = EditorGUILayout.IntSlider("Sattelite Cities Count", satteliteCitiesCount, 1, 5);
+        }
+        else
         {
             GUILayout.Space(10);
             borderFlat = GUILayout.Toggle(borderFlat, "Border Flat", GUILayout.Width(240));
