@@ -140,12 +140,25 @@ namespace FCG
 
         [Header("Spider Network")]
         public bool generateSpiderNetwork = false;
-        [Range(1, 6)]
+        [Range(1, 10000)]
         public int mainCitiesCount = 1;
-        [Range(0, 4)]
+        [Range(0, 10000)]
         public int subCitiesPerMain = 1;
-        [Range(1, 4)]
+        [Range(0, 10000)]
         public int extraRoadLinks = 2;
+
+        [Header("Advanced Spider Options")]
+        public bool generateCityByCity = true;
+        [Range(500f, 3500f)]
+        public float minMainCityDistance = 1500f;
+        [Range(50f, 800f)]
+        public float roadSegmentSpacing = 240f;
+        [Range(1f, 32f)]
+        public float roadClearanceRadius = 10f;
+        [Range(5f, 80f)]
+        public float roadSnapDistance = 18f;
+
+        private readonly System.Collections.Generic.HashSet<string> roadLinks = new System.Collections.Generic.HashSet<string>();
 
         public void ClearCity()
         {
@@ -222,19 +235,26 @@ namespace FCG
         {
             ClearCity();
             cityMaker = new GameObject("City-Maker");
+            roadLinks.Clear();
 
-            var cityAnchors = new System.Collections.Generic.List<Vector3>();
-            cityAnchors.Add(Vector3.zero);
+            int maxMainCities = Mathf.Max(1, Mathf.Min(mainCitiesCount, 10000));
+            int satellitesPerMainCity = Mathf.Max(defaultSatelliteCount, subCitiesPerMain);
 
-            for (int mainIndex = 0; mainIndex < mainCitiesCount; mainIndex++)
+            var cityAnchors = new System.Collections.Generic.List<Vector3>(maxMainCities);
+
+            for (int mainIndex = 0; mainIndex < maxMainCities; mainIndex++)
             {
                 int citySize = (mainIndex == 0) ? primaryCitySize : Random.Range(1, 5);
-                Vector3 cityOffset = (mainIndex == 0) ? Vector3.zero : RandomCityOffset(mainIndex);
+                Vector3 cityOffset = (mainIndex == 0) ? Vector3.zero : RandomCityOffset(cityAnchors);
                 cityAnchors.Add(cityOffset);
 
-                int localSatellites = Mathf.Max(defaultSatelliteCount, subCitiesPerMain);
                 int borderType = Random.Range(0, 4);
-                GenerateCityCluster(citySize, cityOffset, borderFlat, localSatellites, borderType);
+                GenerateCityCluster(citySize, cityOffset, borderFlat, satellitesPerMainCity, borderType);
+
+                if (generateCityByCity && mainIndex > 0)
+                {
+                    CreateRoadConnection(cityAnchors[mainIndex - 1], cityOffset, 1f, true);
+                }
             }
 
             BuildSpiderRoadLinks(cityAnchors);
@@ -244,11 +264,33 @@ namespace FCG
                 dayNight.ChangeMaterial();
         }
 
-        private Vector3 RandomCityOffset(int cityIndex)
+        private Vector3 RandomCityOffset(System.Collections.Generic.List<Vector3> existingAnchors)
         {
-            float radius = 1800f + cityIndex * Random.Range(400f, 750f);
-            float angle = Random.Range(0f, Mathf.PI * 2f);
-            return new Vector3(Mathf.Cos(angle) * radius, 0, Mathf.Sin(angle) * radius);
+            int safeAttempts = 0;
+            while (safeAttempts < 45)
+            {
+                safeAttempts++;
+                float radius = minMainCityDistance * Mathf.Sqrt(safeAttempts + Random.Range(0.3f, 1f));
+                float angle = Random.Range(0f, Mathf.PI * 2f);
+                Vector3 candidate = new Vector3(Mathf.Cos(angle) * radius, 0, Mathf.Sin(angle) * radius);
+
+                bool isFarFromOthers = true;
+                for (int i = 0; i < existingAnchors.Count; i++)
+                {
+                    if (Vector3.Distance(existingAnchors[i], candidate) < minMainCityDistance)
+                    {
+                        isFarFromOthers = false;
+                        break;
+                    }
+                }
+
+                if (isFarFromOthers)
+                    return candidate;
+            }
+
+            float fallbackRadius = minMainCityDistance * (existingAnchors.Count + 1);
+            float fallbackAngle = existingAnchors.Count * 0.95f;
+            return new Vector3(Mathf.Cos(fallbackAngle) * fallbackRadius, 0, Mathf.Sin(fallbackAngle) * fallbackRadius);
         }
 
         private void GenerateCityCluster(int citySize, Vector3 offset, bool borderFlat, int satelliteCount, int borderType)
@@ -270,11 +312,12 @@ namespace FCG
             Quaternion borderRotation = Quaternion.Euler(0, borderType * 90f, 0);
             Instantiate(selectedBorder[Random.Range(0, selectedBorder.Length)], offset, borderRotation, cityMaker.transform);
 
-            for (int satelliteIndex = 0; satelliteIndex < satelliteCount; satelliteIndex++)
+            int satellitesToSpawn = Mathf.Min(Mathf.Max(0, satelliteCount), 10000);
+            for (int satelliteIndex = 0; satelliteIndex < satellitesToSpawn; satelliteIndex++)
             {
-                Vector3 satOffset = offset + Quaternion.Euler(0, satelliteIndex * (360f / Mathf.Max(1, satelliteCount)), 0) * new Vector3(0, 0, Random.Range(700f, 1200f));
+                Vector3 satOffset = offset + Quaternion.Euler(0, satelliteIndex * (360f / Mathf.Max(1, satellitesToSpawn)), 0) * new Vector3(0, 0, Random.Range(700f, 1200f));
                 GenerateSubCity(satOffset, borderFlat);
-                CreateRoadConnection(offset, satOffset, 0.65f);
+                CreateRoadConnection(offset, satOffset, 0.65f, true);
             }
         }
 
@@ -316,29 +359,33 @@ namespace FCG
 
         private void BuildSpiderRoadLinks(System.Collections.Generic.List<Vector3> cityAnchors)
         {
-            if (cityAnchors.Count < 3)
+            if (cityAnchors.Count < 2)
                 return;
 
-            Vector3 center = cityAnchors[1];
-            for (int i = 2; i < cityAnchors.Count; i++)
+            Vector3 center = cityAnchors[0];
+            for (int i = 1; i < cityAnchors.Count; i++)
             {
-                CreateRoadConnection(center, cityAnchors[i], 1f);
+                CreateRoadConnection(center, cityAnchors[i], 1f, true);
             }
 
-            for (int i = 0; i < extraRoadLinks; i++)
+            int linksToBuild = Mathf.Min(Mathf.Max(0, extraRoadLinks), 10000);
+            for (int i = 0; i < linksToBuild; i++)
             {
-                int a = Random.Range(1, cityAnchors.Count);
-                int b = Random.Range(1, cityAnchors.Count);
+                int a = Random.Range(0, cityAnchors.Count);
+                int b = Random.Range(0, cityAnchors.Count);
                 if (a == b)
                     continue;
-                CreateRoadConnection(cityAnchors[a], cityAnchors[b], 0.5f);
+                CreateRoadConnection(cityAnchors[a], cityAnchors[b], 0.55f, true);
             }
         }
 
-        private void CreateRoadConnection(Vector3 start, Vector3 end, float density)
+        private void CreateRoadConnection(Vector3 start, Vector3 end, float density, bool preventDuplicates = false)
         {
             GameObject[] roadChoices = (forward400 != null && forward400.Length > 0) ? forward400 : forward300;
             if (roadChoices == null || roadChoices.Length == 0)
+                return;
+
+            if (preventDuplicates && !ReserveRoadLink(start, end))
                 return;
 
             Vector3 delta = end - start;
@@ -348,15 +395,86 @@ namespace FCG
 
             Vector3 direction = delta.normalized;
             Quaternion rotation = Quaternion.LookRotation(direction, Vector3.up);
-            float spacing = Mathf.Lerp(360f, 220f, Mathf.Clamp01(density));
+            float densitySpacing = Mathf.Lerp(360f, 180f, Mathf.Clamp01(density));
+            float spacing = Mathf.Max(90f, Mathf.Min(roadSegmentSpacing, densitySpacing));
             int segments = Mathf.Max(1, Mathf.FloorToInt(distance / spacing));
 
             for (int segmentIndex = 0; segmentIndex <= segments; segmentIndex++)
             {
                 float t = segmentIndex / (float)segments;
                 Vector3 roadPos = Vector3.Lerp(start, end, t);
+                if (segmentIndex > 0 && segmentIndex < segments)
+                    roadPos = SnapRoadToGround(roadPos);
+
+                if (RoadPointHasCollision(roadPos))
+                    continue;
+
                 Instantiate(roadChoices[Random.Range(0, roadChoices.Length)], roadPos, rotation, cityMaker.transform);
             }
+        }
+
+        private bool ReserveRoadLink(Vector3 a, Vector3 b)
+        {
+            string first = Mathf.RoundToInt(a.x) + "_" + Mathf.RoundToInt(a.z);
+            string second = Mathf.RoundToInt(b.x) + "_" + Mathf.RoundToInt(b.z);
+            string key = string.CompareOrdinal(first, second) < 0 ? first + "-" + second : second + "-" + first;
+
+            if (roadLinks.Contains(key))
+                return false;
+
+            roadLinks.Add(key);
+            return true;
+        }
+
+        private Vector3 SnapRoadToGround(Vector3 position)
+        {
+            RaycastHit hit;
+            Vector3 top = position + Vector3.up * 600f;
+            if (Physics.Raycast(top, Vector3.down, out hit, 1500f))
+            {
+                position.y = hit.point.y;
+                return position;
+            }
+
+            return position;
+        }
+
+        private bool RoadPointHasCollision(Vector3 position)
+        {
+            Collider[] blocked = Physics.OverlapSphere(position + Vector3.up * 2f, roadClearanceRadius);
+            for (int i = 0; i < blocked.Length; i++)
+            {
+                Collider current = blocked[i];
+                if (!current)
+                    continue;
+
+                string lowerName = current.name.ToLowerInvariant();
+                if (lowerName.Contains("road") || lowerName.Contains("street") || lowerName.Contains("waypoint"))
+                    return true;
+
+                if (current.gameObject != cityMaker && !current.transform.IsChildOf(cityMaker.transform))
+                    return true;
+            }
+
+            if (cityMaker)
+            {
+                Transform[] children = cityMaker.GetComponentsInChildren<Transform>();
+                for (int i = 0; i < children.Length; i++)
+                {
+                    Transform child = children[i];
+                    if (!child || child == cityMaker.transform)
+                        continue;
+
+                    if (Vector3.Distance(child.position, position) < roadSnapDistance)
+                    {
+                        string lowerName = child.name.ToLowerInvariant();
+                        if (!lowerName.Contains("road") && !lowerName.Contains("street") && !lowerName.Contains("exit"))
+                            return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
 
