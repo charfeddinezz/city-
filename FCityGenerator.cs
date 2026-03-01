@@ -262,7 +262,7 @@ public class FCityGenerator : EditorWindow
             GenerateCity(3, borderFlat);
 
         if (GUILayout.Button("Very Large"))
-            GenerateCity(4, borderFlat);
+            GenerateCity(5, borderFlat);
 
 
         GUILayout.Space(5);
